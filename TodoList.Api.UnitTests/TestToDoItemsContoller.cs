@@ -1,71 +1,258 @@
-using Xunit;
+﻿using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Mvc.Rendering;
 using Moq;
-using TodoList.Api.Controllers;
-using Microsoft.Extensions.Logging;
-using System.Collections.Generic;
 using System;
+using System.Collections.Generic;
 using System.Linq;
-using System.Data.Entity.Infrastructure;
-using TestingDemo;
-using Microsoft.EntityFrameworkCore;
+using System.Net;
+using System.Text;
 using System.Threading.Tasks;
+using TodoList.Api.Controllers;
+using Xunit;
 
 namespace TodoList.Api.UnitTests
 {
-    public class ToDoItemsControllerTest
+    /// <summary>
+    /// Tests the ToDoItemsContoller by mocking out the todoItemsRepository
+    /// </summary>
+    public class TestToDoItemsContoller
     {
-        Mock<TodoContext> mockContext = new Mock<TodoContext>();
-        Mock<ILogger<TodoItemsController>> mockController = new Mock<ILogger<TodoItemsController>>();
 
-       
+        Mock<IToDoRepository> mockRepository;
+
+        public TestToDoItemsContoller()
+        {
+            mockRepository = new Mock<IToDoRepository>();
+        }
+
         [Fact]
-        public async Task Test_GetToDoItemsAsync()
-        { 
+        public async Task TestGetTodoItemsAsync_Success()
+        {
 
-            //Arrange
             List<TodoItem> toDoItems = new List<TodoItem> {
                 new TodoItem {Id =  Guid.Parse("0b74e8d1-af62-4b12-9951-3e9037864069"),IsCompleted = false,Description = "test1" },
                  new TodoItem{Id =  Guid.Parse("4E7F7080-C7D6-42E6-BC4A-30EA8C90E595"),IsCompleted = false,Description = "test2" }
              };
 
-            var toDoItemsQueryable = toDoItems.AsQueryable();
+            mockRepository.Setup(m => m.GetNonCompletedItemsAsync()).ReturnsAsync(toDoItems);
 
-            var mockSet = new Mock<DbSet<TodoItem>>();
+            TodoItemsController controller = new TodoItemsController(mockRepository.Object);
 
-            mockSet.As<IDbAsyncEnumerable<TodoItem>>()
-               .Setup(m => m.GetAsyncEnumerator())
-               .Returns(new TestDbAsyncEnumerator<TodoItem>(toDoItemsQueryable.GetEnumerator()));
+            var result = await controller.GetTodoItems();
 
-            mockSet.As<IQueryable<TodoItem>>()
-               .Setup(m => m.Provider)
-               .Returns(new TestDbAsyncQueryProvider<TodoItem>(toDoItemsQueryable.Provider));
+            Assert.NotNull(result);
 
-            mockSet.As<IQueryable<TodoItem>>().Setup(m => m.Expression).Returns(toDoItemsQueryable.Expression);
-            mockSet.As<IQueryable<TodoItem>>().Setup(m => m.ElementType).Returns(toDoItemsQueryable.ElementType);
-            mockSet.As<IQueryable<TodoItem>>().Setup(m => m.GetEnumerator()).Returns(() => toDoItemsQueryable.GetEnumerator());
+            Assert.True(result is OkObjectResult);
 
-            var mockLogger = new Mock<ILogger<TodoItemsController>>();
+            var returnedPayload = (OkObjectResult)result;
 
+            List<TodoItem> returnedToDoItems = ((List<TodoItem>)returnedPayload.Value);
 
-            var mockContext = new Mock<TodoContext>();
-            
-            mockContext.Setup(c => c.TodoItems).Returns(mockSet.Object);
-          
-
-            var service = new TodoItemsController(mockContext.Object, mockLogger.Object);
-            //TODO: had problems mocking _context.TodoItems
-            //  error -   system.NotSupportedException : Unsupported expression: c => c.TodoItems
-            //   Non - overridable members(here: TodoContext.get_TodoItems) may not be used in setup / verification expressions.
-
-
-            //Act
-            var actionResult = await service.GetTodoItems();
-
-
-            //Assert
-
-
+            Assert.True(returnedToDoItems.Count == 2);
+            Assert.True(returnedPayload.StatusCode == 200);
 
         }
+
+        [Fact]
+        public async Task TestGetTodoItemAsync_Success()
+        {
+
+            TodoItem todoItem = new TodoItem { Id = Guid.Parse("4E7F7080-C7D6-42E6-BC4A-30EA8C90E595"), IsCompleted = false, Description = "test2" };
+            mockRepository.Setup(m => m.GetToDoItemAsync(It.IsAny<Guid>())).ReturnsAsync(todoItem);
+
+
+            TodoItemsController controller = new TodoItemsController(mockRepository.Object);
+
+
+            Guid id = Guid.Parse("4E7F7080-C7D6-42E6-BC4A-30EA8C90E595");
+
+            var result = await controller.GetTodoItem(id);
+
+            Assert.NotNull(result);
+
+            Assert.True(result is OkObjectResult);
+
+            var returnedPayload = (OkObjectResult)result;
+
+            TodoItem returnedToDoItem = ((TodoItem)returnedPayload.Value);
+
+            Assert.NotNull(returnedToDoItem);
+
+            Assert.True(returnedToDoItem.Description == "test2");
+
+            Assert.True(returnedPayload.StatusCode == 200);
+
+        }
+
+        [Fact]
+        public async Task TestGetTodoItemAsync_Fail_Result_Null()
+        {
+
+            TodoItem todoItem = null;
+            mockRepository.Setup(m => m.GetToDoItemAsync(It.IsAny<Guid>())).ReturnsAsync(todoItem);
+
+            TodoItemsController controller = new TodoItemsController(mockRepository.Object);
+
+            Guid id = Guid.Parse("4E7F7080-C7D6-42E6-BC4A-30EA8C90E595");
+
+            var result = await controller.GetTodoItem(id);
+
+
+            Assert.True(result is NotFoundResult);
+
+            var returnedPayload = (NotFoundResult)result;
+
+            Assert.True(returnedPayload.StatusCode == 404);
+
+        }
+
+
+        [Fact]
+        public async Task TestPutTodoItem_Success()
+        {
+            TodoItem todoItem = new TodoItem { Id = Guid.Parse("4E7F7080-C7D6-42E6-BC4A-30EA8C90E595"), IsCompleted = false, Description = "test2" };
+            Guid id = Guid.Parse("4E7F7080-C7D6-42E6-BC4A-30EA8C90E595");
+
+            mockRepository.Setup(m => m.UpdateTodoItemAsync(It.IsAny<Guid>(), It.IsAny<TodoItem>()));
+
+            TodoItemsController controller = new TodoItemsController(mockRepository.Object);
+            var result = await controller.PutTodoItem(id, todoItem);
+
+            Assert.True(result is NoContentResult);
+
+        }
+
+
+        [Fact]
+        public async Task TestPutTodoItem_Fail_BadRequest()
+        {
+            TodoItem todoItem = new TodoItem { Id = Guid.Parse("4E7F7080-C7D6-42E6-BC4A-30EA8C90E595"), IsCompleted = false, Description = "test2" };
+           
+            // use different id
+            Guid differentId = Guid.Parse("4E7F7080-C7D6-42E6-BC4A-30EA8C90E597");
+
+            mockRepository.Setup(m => m.UpdateTodoItemAsync(It.IsAny<Guid>(), It.IsAny<TodoItem>()));
+
+            TodoItemsController controller = new TodoItemsController(mockRepository.Object);
+            var result = await controller.PutTodoItem(differentId, todoItem);
+
+            Assert.True(result is BadRequestResult);
+
+        }
+
+        [Fact]
+        public async Task TestPutTodoItem_Fail_NotFound_ToDoException()
+        {
+            TodoItem todoItem = new TodoItem { Id = Guid.Parse("4E7F7080-C7D6-42E6-BC4A-30EA8C90E595"), IsCompleted = false, Description = "test2" };
+
+            Guid id = Guid.Parse("4E7F7080-C7D6-42E6-BC4A-30EA8C90E595");
+
+            mockRepository.Setup(m => m.UpdateTodoItemAsync(It.IsAny<Guid>(), It.IsAny<TodoItem>())).Throws(new ToDoException("ToDoItem Not Found"));
+
+            TodoItemsController controller = new TodoItemsController(mockRepository.Object);
+            var result = await controller.PutTodoItem(id, todoItem);
+
+            Assert.True(result is NotFoundObjectResult);
+
+        }
+
+        [Fact]
+        public async Task TestPutTodoItem_Fail_DBUpdate_ToDoException()
+        {
+            TodoItem todoItem = new TodoItem { Id = Guid.Parse("4E7F7080-C7D6-42E6-BC4A-30EA8C90E595"), IsCompleted = false, Description = "test2" };
+
+            Guid id = Guid.Parse("4E7F7080-C7D6-42E6-BC4A-30EA8C90E595");
+
+            mockRepository.Setup(m => m.UpdateTodoItemAsync(It.IsAny<Guid>(), It.IsAny<TodoItem>())).Throws(new Microsoft.EntityFrameworkCore.DbUpdateConcurrencyException());
+
+            TodoItemsController controller = new TodoItemsController(mockRepository.Object);
+            var result = await controller.PutTodoItem(id, todoItem);
+
+            Assert.True(result is UnprocessableEntityObjectResult);
+
+        }
+
+        [Fact]
+        public async Task TestPutTodoItem_Fail_Exception_ToDoException()
+        {
+            TodoItem todoItem = new TodoItem { Id = Guid.Parse("4E7F7080-C7D6-42E6-BC4A-30EA8C90E595"), IsCompleted = false, Description = "test2" };
+
+            Guid id = Guid.Parse("4E7F7080-C7D6-42E6-BC4A-30EA8C90E595");
+
+            mockRepository.Setup(m => m.UpdateTodoItemAsync(It.IsAny<Guid>(), It.IsAny<TodoItem>())).Throws(new Exception());
+
+            TodoItemsController controller = new TodoItemsController(mockRepository.Object);
+            var result = await controller.PutTodoItem(id, todoItem);
+
+            Assert.True(result is StatusCodeResult);
+            Assert.True(((StatusCodeResult)result).StatusCode == (int)HttpStatusCode.InternalServerError);
+
+        }
+
+
+        [Fact]
+        public async Task TestPostTodoItem_Success()
+        {
+            TodoItem todoItem = new TodoItem { Id = Guid.Parse("4E7F7080-C7D6-42E6-BC4A-30EA8C90E595"), IsCompleted = false, Description = "test2" };
+            
+            mockRepository.Setup(m => m.CreateToDoItem( It.IsAny<TodoItem>()));
+
+            TodoItemsController controller = new TodoItemsController(mockRepository.Object);
+            var result = await controller.PostTodoItem( todoItem);
+
+            Assert.True(result is CreatedAtActionResult);
+
+        }
+
+        [Fact]
+        public async Task TestPostTodoItem_Fail_Description_required()
+        {
+            TodoItem todoItem = new TodoItem { Id = Guid.Parse("4E7F7080-C7D6-42E6-BC4A-30EA8C90E595"), IsCompleted = false, Description = "" };
+
+            mockRepository.Setup(m => m.CreateToDoItem(It.IsAny<TodoItem>()));
+
+            TodoItemsController controller = new TodoItemsController(mockRepository.Object);
+            var result = await controller.PostTodoItem(todoItem);
+
+            Assert.True(result is BadRequestObjectResult);
+
+        }
+
+        [Fact]
+        public async Task TestPostTodoItem_Fail_Description_already_exists()
+        {
+            TodoItem todoItem = new TodoItem { Id = Guid.Parse("4E7F7080-C7D6-42E6-BC4A-30EA8C90E595"), IsCompleted = false, Description = "test2" };
+
+            mockRepository.Setup(m => m.CreateToDoItem(It.IsAny<TodoItem>())).Throws(new ToDoException("Description already exists"));
+
+            TodoItemsController controller = new TodoItemsController(mockRepository.Object);
+            var result = await controller.PostTodoItem(todoItem);
+
+            Assert.True(result is BadRequestObjectResult);
+
+        }
+
+        [Fact]
+        public async Task TestPostTodoItem_Fail_exception()
+        {
+            TodoItem todoItem = new TodoItem { Id = Guid.Parse("4E7F7080-C7D6-42E6-BC4A-30EA8C90E595"), IsCompleted = false, Description = "test2" };
+
+            mockRepository.Setup(m => m.CreateToDoItem(It.IsAny<TodoItem>())).Throws(new Exception());
+
+            TodoItemsController controller = new TodoItemsController(mockRepository.Object);
+            var result = await controller.PostTodoItem(todoItem);
+
+            Assert.True(result is StatusCodeResult);
+
+
+            Assert.True(((StatusCodeResult)result).StatusCode == (int)HttpStatusCode.InternalServerError);
+
+        }
+
+
+
+
+
+
     }
 }

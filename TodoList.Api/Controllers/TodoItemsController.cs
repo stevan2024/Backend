@@ -4,11 +4,12 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using System;
 using System.Linq;
+using System.Net;
 using System.Threading.Tasks;
 
 namespace TodoList.Api.Controllers
 {
-    
+
     [Route("api/[controller]")]
     [EnableCors("AllowAllHeaders")]
     [ApiController]
@@ -17,10 +18,11 @@ namespace TodoList.Api.Controllers
         private readonly TodoContext _context;
         private readonly ILogger<TodoItemsController> _logger;
 
-        public TodoItemsController(TodoContext context, ILogger<TodoItemsController> logger)
+        private IToDoRepository _toDoRespository;
+
+        public TodoItemsController(IToDoRepository toDoRespository)
         {
-            _context = context;
-            _logger = logger;
+            _toDoRespository = toDoRespository;
         }
 
         // GET: api/TodoItems
@@ -28,7 +30,11 @@ namespace TodoList.Api.Controllers
         [HttpGet]
         public async Task<IActionResult> GetTodoItems()
         {
-            var results = await _context.TodoItems.Where(x => !x.IsCompleted).ToListAsync();
+            // var results = await _context.TodoItems.Where(x => !x.IsCompleted).ToListAsync();
+
+            var results = await _toDoRespository.GetNonCompletedItemsAsync();
+
+
             return Ok(results);
         }
 
@@ -37,7 +43,10 @@ namespace TodoList.Api.Controllers
         [HttpGet("{id}")]
         public async Task<IActionResult> GetTodoItem(Guid id)
         {
-            var result = await _context.TodoItems.FindAsync(id);
+            //var result = await _context.TodoItems.FindAsync(id);
+
+            var result = await _toDoRespository.GetToDoItemAsync(id);
+
 
             if (result == null)
             {
@@ -48,32 +57,41 @@ namespace TodoList.Api.Controllers
         }
 
         // PUT: api/TodoItems/...
-         [EnableCors("AllowAllHeaders")]
+        [EnableCors("AllowAllHeaders")]
         [HttpPut("{id}")]
         public async Task<IActionResult> PutTodoItem(Guid id, TodoItem todoItem)
         {
-            if (id != todoItem.Id)
-            {
-                return BadRequest();
-            }
-
-            _context.Entry(todoItem).State = EntityState.Modified;
-
             try
             {
-                await _context.SaveChangesAsync();
+                if (id != todoItem.Id)
+                {
+                    return BadRequest();
+                }
+
+                await _toDoRespository.UpdateTodoItemAsync(id, todoItem);
             }
-            catch (DbUpdateConcurrencyException)
+            catch(ToDoException todoException)
             {
-                if (!TodoItemIdExists(id))
+                if (!string.IsNullOrEmpty(todoException.Message))
                 {
-                    return NotFound();
-                }
-                else
-                {
-                    throw;
+
+                    if(todoException.Message == "ToDoItem Not Found")
+                    {
+                        return NotFound(todoException);
+                    }
+
                 }
             }
+            catch (DbUpdateConcurrencyException exception)
+            {
+                return UnprocessableEntity(exception);
+            }
+            catch(Exception)
+            {
+                return new StatusCodeResult((int)HttpStatusCode.InternalServerError);
+            }
+
+
 
             return NoContent();
         }
@@ -87,16 +105,29 @@ namespace TodoList.Api.Controllers
             {
                 return BadRequest("Description is required");
             }
-            else if (TodoItemDescriptionExists(todoItem.Description))
+            try
             {
-                return BadRequest("Description already exists");
-            } 
+                await _toDoRespository.CreateToDoItem(todoItem);
+            }
+            catch (ToDoException todoException)
+            {
+                if (!string.IsNullOrEmpty(todoException.Message))
+                {
 
-            _context.TodoItems.Add(todoItem);
-            await _context.SaveChangesAsync();
-             
+                    if (todoException.Message == "Description already exists")
+                    {
+                        return BadRequest(todoException);
+                    }
+
+                }
+            }
+            catch (Exception)
+            {
+                return new StatusCodeResult((int)HttpStatusCode.InternalServerError);
+            }
+
             return CreatedAtAction(nameof(GetTodoItem), new { id = todoItem.Id }, todoItem);
-        } 
+        }
 
         private bool TodoItemIdExists(Guid id)
         {
